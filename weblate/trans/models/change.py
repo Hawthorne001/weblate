@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import sentry_sdk
 from django.conf import settings
 from django.core.cache import cache
 from django.db import models, transaction
@@ -166,7 +167,7 @@ class ChangeQuerySet(models.QuerySet["Change"]):
         more effective here.
         """
         result = []
-        with transaction.atomic():
+        with transaction.atomic(), sentry_sdk.start_span(op="recent changes"):
             for change in self.order().iterator(chunk_size=count):
                 result.append(change)
                 if len(result) >= count:
@@ -358,6 +359,7 @@ class Change(models.Model, UserDisplayMixin):
     ACTION_STRING_UPLOAD_UPDATE = 72
     ACTION_NEW_UNIT_UPLOAD = 73
     ACTION_SOURCE_UPLOAD = 74
+    ACTION_COMPLETED_COMPONENT = 75
 
     ACTION_CHOICES = (
         # Translators: Name of event in the history
@@ -501,6 +503,8 @@ class Change(models.Model, UserDisplayMixin):
         (ACTION_NEW_UNIT_UPLOAD, gettext_lazy("String added in the upload")),
         # Translators: Name of event in the history
         (ACTION_SOURCE_UPLOAD, gettext_lazy("Translation updated by source upload")),
+        # Translators: Name of event in the history
+        (ACTION_COMPLETED_COMPONENT, gettext_lazy("Component translation completed")),
     )
     ACTIONS_DICT = dict(ACTION_CHOICES)
     ACTION_STRINGS = {
@@ -702,6 +706,8 @@ class Change(models.Model, UserDisplayMixin):
             return self.translation.get_absolute_url()
         if self.component is not None:
             return self.component.get_absolute_url()
+        if self.category is not None:
+            return self.category.get_absolute_url()
         if self.project is not None:
             return self.project.get_absolute_url()
         return None
@@ -713,6 +719,8 @@ class Change(models.Model, UserDisplayMixin):
             return self.translation
         if self.component is not None:
             return self.component
+        if self.category is not None:
+            return self.category
         if self.project is not None:
             return self.project
         return None
@@ -755,6 +763,7 @@ class Change(models.Model, UserDisplayMixin):
             self.language = self.translation.language
         if self.component:
             self.project = self.component.project
+            self.category = self.component.category
 
     @property
     def plural_count(self):
