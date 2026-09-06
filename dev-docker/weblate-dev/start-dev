@@ -41,8 +41,11 @@ echo "Exporting Weblate requirements..."
 uv export --no-config --format requirements-txt --python "python${PYVERSION}" --all-extras > /tmp/requirements.txt
 
 echo "Checking /app/venv..."
-if [ ! -f /app/venv/bin/activate ]; then
-    uv venv --no-config /app/venv
+# A named volume can outlive the image's managed Python interpreter. Recreate
+# environments from another Python minor version, including broken symlinks.
+if [ ! -f /app/venv/bin/activate ] || ! /app/venv/bin/python -c \
+    'import sys; sys.exit("%s.%s" % sys.version_info[:2] != sys.argv[1])' "$PYVERSION"; then
+    uv venv --no-config --clear --python "/usr/local/bin/python3" /app/venv
 fi
 echo "/app/data/python" > "/app/venv/lib/python${PYVERSION}/site-packages/weblate-docker.pth"
 # shellcheck disable=SC1091

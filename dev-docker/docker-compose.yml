@@ -10,6 +10,13 @@ services:
   weblate:
     profiles: [app]
     init: true
+    # The inherited check verifies supervisor but accepts HTTP error responses.
+    # Require Django readiness before starting application QA or exposing URLs.
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - /app/bin/health_check && curl --fail --silent --show-error --max-time 5 http://127.0.0.1:8080/healthz/ > /dev/null
+      timeout: 10s
     depends_on:
       app-database:
         condition: service_healthy

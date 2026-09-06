@@ -262,7 +262,9 @@ Ports can change after containers are recreated or restarted. Use
 ``./rundev.sh restart`` to restart and rediscover them; direct Docker restarts
 cannot initialize the application domain. Ordinary startup reuses unchanged
 containers. Application containers do not restart automatically after Docker
-restarts.
+restarts. When the image changes Python minor versions, startup recreates the
+application virtual environment and reinstalls dependencies. Application data
+is retained.
 
 To access the application database from inside its container:
 

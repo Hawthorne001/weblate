@@ -106,6 +106,38 @@ sys.exit(int(os.environ.get('FAIL_STATUS', '0')) if os.environ.get('FAIL_COMMAND
         self.assertIn("developer", self.commands()[0])
         self.assertIn("weblate", self.commands()[0])
 
+    def test_log_options_keep_profile_scope(self) -> None:
+        for launcher, prefix, services in (
+            ("rundev.sh", [], ["weblate", "app-database", "app-cache", "maildev"]),
+            ("scripts/devcontainer", [], ["developer", "database", "cache"]),
+            (
+                "rundev.sh",
+                ["--all"],
+                [
+                    "developer",
+                    "database",
+                    "cache",
+                    "weblate",
+                    "app-database",
+                    "app-cache",
+                    "maildev",
+                ],
+            ),
+        ):
+            for options in (
+                ["--tail", "20"],
+                ["--follow"],
+                ["-n20", "-t"],
+                ["--since=1h", "--until", "5m", "--no-color"],
+            ):
+                with self.subTest(launcher=launcher, prefix=prefix, options=options):
+                    self.log.write_text("")
+                    self.assertEqual(
+                        self.run_script(*prefix, "logs", *options, launcher=launcher), 0
+                    )
+                    expected = ["logs", *options, *services]
+                    self.assertEqual(self.commands()[0][-len(expected) :], expected)
+
     def test_filtered_logs_forward_arguments(self) -> None:
         self.assertEqual(self.run_script("logs", "--tail", "20", "weblate"), 0)
         self.assertEqual(self.commands()[0][-4:], ["logs", "--tail", "20", "weblate"])
@@ -116,6 +148,77 @@ sys.exit(int(os.environ.get('FAIL_STATUS', '0')) if os.environ.get('FAIL_COMMAND
 
 
 class ApplicationEntrypointTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("uv"), "uv is required for venv lifecycle tests")
+    def test_persisted_python_environment(self) -> None:
+        source = (
+            Path(__file__).resolve().parent.parent / "dev-docker/weblate-dev/start-dev"
+        )
+        for state in ("missing", "compatible", "old", "broken"):
+            with self.subTest(state=state), TemporaryDirectory() as directory:
+                root = Path(directory)
+                venv = root / "venv"
+                version = f"{sys.version_info.major}.{sys.version_info.minor}"
+                environment = {
+                    **os.environ,
+                    "WEBLATE_SOURCE_DIR": directory,
+                    "PYVERSION": version,
+                    "UV_NO_CACHE": "1",
+                    "WEBLATE_SITE_DOMAIN_FILE": "",
+                }
+                uv = shutil.which("uv")
+                if uv is None:
+                    self.skipTest("uv is required for venv lifecycle tests")
+                if state != "missing":
+                    subprocess.run(
+                        [
+                            uv,
+                            "venv",
+                            "--no-config",
+                            "--python",
+                            sys.executable,
+                            str(venv),
+                        ],
+                        env=environment,
+                        check=True,
+                        capture_output=True,
+                    )
+                    (venv / "marker").write_text("keep compatible environments")
+                    if state in {"old", "broken"}:
+                        (venv / "bin/python").unlink()
+                    if state == "old":
+                        (venv / "bin/python").write_text("#!/bin/sh\nexit 1\n")
+                        (venv / "bin/python").chmod(0o755)
+                stub = root / "uv"
+                stub.write_text(
+                    f"#!{sys.executable}\nimport os,sys\n"
+                    f"if sys.argv[1] == 'venv': os.execv({uv!r}, [{uv!r}, *sys.argv[1:]])\n"
+                    "sys.exit(42 if sys.argv[1] == 'pip' else 0)\n"
+                )
+                stub.chmod(0o755)
+                environment["PATH"] = f"{root}:{os.environ['PATH']}"
+                script = root / "start-dev"
+                script.write_text(
+                    source.read_text()
+                    .replace("/app/venv", str(venv))
+                    .replace("/usr/local/bin/python3", sys.executable)
+                    # Redirect the entrypoint's temporary output into this fixture.
+                    .replace("/tmp/requirements.txt", str(root / "requirements.txt"))  # ruff: ignore[hardcoded-temp-file]
+                )
+                result = subprocess.run(
+                    ["sh", str(script)],
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 42, result.stdout + result.stderr)
+                self.assertTrue(
+                    (
+                        venv / f"lib/python{version}/site-packages/weblate-docker.pth"
+                    ).is_file()
+                )
+                self.assertEqual((venv / "marker").exists(), state == "compatible")
+
     def test_domain_gate_and_timeout(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)

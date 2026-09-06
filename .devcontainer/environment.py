@@ -107,6 +107,23 @@ SERVICES = {
 }
 
 
+def log_arguments(arguments: list[str], services: list[str]) -> list[str]:
+    """Keep option-only log requests scoped while preserving explicit services."""
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    for flags in (
+        ("-f", "--follow"),
+        ("-t", "--timestamps"),
+        ("--no-color",),
+        ("--no-log-prefix",),
+        ("--dry-run",),
+    ):
+        parser.add_argument(*flags, action="store_true")
+    for flags in (("-n", "--tail"), ("--since",), ("--until",), ("--index",)):
+        parser.add_argument(*flags)
+    _options, explicit_services = parser.parse_known_args(arguments)
+    return arguments if explicit_services else [*arguments, *services]
+
+
 class Environment:
     """One checkout, one Compose project, two independently managed profiles."""
 
@@ -367,7 +384,7 @@ def dispatch(
     if command == "destroy":
         return env.destroy(all_profiles=all_profiles)
     if command == "logs":
-        return env.call("logs", *(arguments or services))
+        return env.call("logs", *log_arguments(arguments, services))
     if command == "urls":
         env.print_urls(as_json=arguments == ["--json"])
         return 0
